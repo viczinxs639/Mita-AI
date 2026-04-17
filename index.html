@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MITA - Machine Intelligence Thinking Assistant</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- TELA DE LOGIN -->
+  <div id="loginScreen" class="login-screen">
+    <div class="login-card">
+      <div class="robot-animation">🤖</div>
+      <h1>MITA</h1>
+      <p class="subtitle">Machine Intelligence Thinking Assistant</p>
+
+      <div class="input-group">
+        <label>👤 Seu nome</label>
+        <input type="text" id="userNameInput" placeholder="Digite seu nome" maxlength="30">
+      </div>
+
+      <div class="api-options">
+        <label>⚙️ Configuração da IA</label>
+        <div class="radio-group">
+          <label class="radio-option">
+            <input type="radio" name="apiMode" value="local" checked> 
+            <span>📡 Modo Local (sem API)</span>
+            <small>Respostas pré-definidas, mais rápido</small>
+          </label>
+          <label class="radio-option">
+            <input type="radio" name="apiMode" value="openai"> 
+            <span>🚀 OpenAI API</span>
+            <small>Respostas mais inteligentes</small>
+          </label>
+        </div>
+      </div>
+
+      <div id="openaiKeyInput" class="input-group" style="display: none;">
+        <label>🔑 Chave da API OpenAI</label>
+        <input type="password" id="apiKeyInput" placeholder="sk-...">
+        <small>A chave fica salva apenas no seu navegador</small>
+      </div>
+
+      <button id="startMitaBtn" class="start-btn">🚀 Iniciar MITA</button>
+    </div>
+  </div>
+
+  <!-- TELA PRINCIPAL DA MITA -->
+  <div id="mainApp" class="app-container" style="display: none;">
+    <aside class="sidebar">
+      <div class="logo-area">
+        <div class="robot-icon">🤖</div>
+        <h2>MITA</h2>
+        <span class="badge" id="modeBadge">Modo Local</span>
+      </div>
+      <div class="user-info">
+        <div class="avatar" id="userAvatar">U</div>
+        <span id="username">Usuário</span>
+        <button id="logoutBtn" class="logout-btn">Sair</button>
+      </div>
+      <div class="history-area">
+        <h3>📜 Histórico</h3>
+        <ul id="historyList"></ul>
+      </div>
+    </aside>
+    <main class="chat-area">
+      <div class="chat-header">
+        <h1>MITA <span>Machine Intelligence Thinking Assistant</span></h1>
+        <button id="voiceBtn" class="voice-btn">🎤</button>
+      </div>
+      <div class="messages" id="messagesContainer">
+        <div class="message assistant">
+          Olá, sou a MITA. Como posso ajudar você hoje?
+        </div>
+      </div>
+      <div class="input-area">
+        <textarea id="userInput" placeholder="Digite sua pergunta ou código..."></textarea>
+        <button id="sendBtn">Enviar</button>
+      </div>
+    </main>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
