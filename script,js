@@ -1,1 +1,575 @@
+// MITA - Machine Intelligence Thinking Assistant
+// Versão Ultimate com suporte a OpenAI, Groq, Ollama e Modo Local
 
+// ===== VARIÁVEIS GLOBAIS =====
+let currentUser = "guest";
+let apiMode = "local";
+let openaiKey = "";
+let groqKey = "";
+let ollamaUrl = "http://localhost:11434";
+let currentChatId = null;
+let chats = [];
+let currentTheme = "dark";
+let focusMode = false;
+let notificationsEnabled = false;
+let soundsEnabled = false;
+let recognition = null;
+
+// Elementos DOM
+const loginScreen = document.getElementById("loginScreen");
+const mainApp = document.getElementById("mainApp");
+const startBtn = document.getElementById("startMitaBtn");
+const userNameInput = document.getElementById("userNameInput");
+const themeToggle = document.getElementById("themeToggle");
+const focusModeBtn = document.getElementById("focusModeBtn");
+const newChatBtn = document.getElementById("newChatBtn");
+const clearChatBtn = document.getElementById("clearChatBtn");
+const voiceBtn = document.getElementById("voiceBtn");
+const imageUploadBtn = document.getElementById("imageUploadBtn");
+const fileUploadBtn = document.getElementById("fileUploadBtn");
+const statsBtn = document.getElementById("statsBtn");
+const settingsBtn = document.getElementById("settingsBtn");
+const searchChats = document.getElementById("searchChats");
+const chatsList = document.getElementById("chatsList");
+const messagesContainer = document.getElementById("messagesContainer");
+const userInput = document.getElementById("userInput");
+const sendBtn = document.getElementById("sendBtn");
+const charCount = document.getElementById("charCount");
+const currentChatTitle = document.getElementById("currentChatTitle");
+const totalMessagesSpan = document.getElementById("totalMessages");
+const chatDaysSpan = document.getElementById("chatDays");
+const currentStreakSpan = document.getElementById("currentStreak");
+
+// ===== INICIALIZAÇÃO DO LOGIN =====
+startBtn.addEventListener("click", () => {
+  currentUser = userNameInput.value.trim() || "Visitante";
+  document.getElementById("username").innerText = currentUser;
+  document.getElementById("userAvatar").innerText = currentUser[0].toUpperCase();
+  
+  // Configurar API escolhida
+  const selectedApi = document.querySelector('input[name="apiMode"]:checked').value;
+  apiMode = selectedApi;
+  
+  if (apiMode === "openai") {
+    openaiKey = document.getElementById("apiKeyInput")?.value.trim() || "";
+    if (!openaiKey.startsWith("sk-")) {
+      showToast("Chave OpenAI inválida! Usando modo local.", "warning");
+      apiMode = "local";
+    } else {
+      showToast("✅ Modo OpenAI ativado!", "success");
+    }
+  } 
+  else if (apiMode === "groq") {
+    groqKey = document.getElementById("groqApiKeyInput")?.value.trim() || "";
+    if (!groqKey) {
+      showToast("Chave Groq inválida! Usando modo local.", "warning");
+      apiMode = "local";
+    } else {
+      showToast("✅ Modo Groq ativado! (Grátis e rápido)", "success");
+    }
+  }
+  else if (apiMode === "ollama") {
+    ollamaUrl = document.getElementById("ollamaUrl")?.value.trim() || "http://localhost:11434";
+    showToast("✅ Modo Ollama ativado! (IA local)", "success");
+  }
+  
+  document.getElementById("modeBadge").innerText = getApiModeName();
+  
+  loginScreen.style.display = "none";
+  mainApp.style.display = "flex";
+  
+  loadAllData();
+  initParticles();
+  initSpeechRecognition();
+  updateStats();
+});
+
+function getApiModeName() {
+  const modes = {
+    local: "Modo Local",
+    openai: "OpenAI GPT",
+    groq: "Groq Cloud",
+    ollama: "Ollama Local"
+  };
+  return modes[apiMode] || "Modo Local";
+}
+
+// ===== GERENCIAMENTO DE CHATS =====
+function loadAllData() {
+  const savedChats = localStorage.getItem(`mita_chats_${currentUser}`);
+  if (savedChats) {
+    chats = JSON.parse(savedChats);
+  } else {
+    const defaultChat = {
+      id: Date.now(),
+      title: "Conversa 1",
+      messages: [{ role: "assistant", content: "Olá! Sou a MITA. Como posso ajudar você hoje?", timestamp: new Date().toISOString() }],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      favorite: false,
+      tags: []
+    };
+    chats = [defaultChat];
+    currentChatId = defaultChat.id;
+    saveChats();
+  }
+  
+  if (!currentChatId && chats.length > 0) {
+    currentChatId = chats[0].id;
+  }
+  
+  renderChatsList();
+  loadChat(currentChatId);
+}
+
+function saveChats() {
+  localStorage.setItem(`mita_chats_${currentUser}`, JSON.stringify(chats));
+  updateStats();
+}
+
+function renderChatsList() {
+  const searchTerm = searchChats?.value.toLowerCase() || "";
+  const filteredChats = chats.filter(chat => 
+    chat.title.toLowerCase().includes(searchTerm) ||
+    chat.messages.some(msg => msg.content.toLowerCase().includes(searchTerm))
+  );
+  
+  if (document.getElementById("chatCount")) {
+    document.getElementById("chatCount").innerText = filteredChats.length;
+  }
+  
+  if (!chatsList) return;
+  
+  chatsList.innerHTML = filteredChats.map(chat => `
+    <li class="chat-item ${chat.id === currentChatId ? 'active' : ''}" data-chat-id="${chat.id}">
+      <div class="chat-info">
+        <div class="chat-title">
+          ${chat.favorite ? '<i class="fas fa-star" style="color: #fbbf24;"></i>' : '<i class="fas fa-comment"></i>'}
+          ${escapeHtml(chat.title)}
+        </div>
+        <div class="chat-preview">${escapeHtml(chat.messages[chat.messages.length - 1]?.content.substring(0, 50) || 'Vazio')}...</div>
+        <div class="chat-date">${new Date(chat.updatedAt).toLocaleDateString()}</div>
+      </div>
+      <div class="chat-actions">
+        <button class="chat-action" onclick="window.editChatTitle(${chat.id})" title="Renomear"><i class="fas fa-pencil-alt"></i></button>
+        <button class="chat-action" onclick="window.toggleFavoriteChat(${chat.id})" title="Favoritar"><i class="fas fa-star"></i></button>
+        <button class="chat-action" onclick="window.deleteChat(${chat.id})" title="Excluir"><i class="fas fa-trash"></i></button>
+      </div>
+    </li>
+  `).join('');
+  
+  document.querySelectorAll('.chat-item').forEach(item => {
+    item.addEventListener('click', (e) => {
+      if (!e.target.closest('.chat-actions')) {
+        const chatId = parseInt(item.dataset.chatId);
+        switchChat(chatId);
+      }
+    });
+  });
+}
+
+function switchChat(chatId) {
+  currentChatId = chatId;
+  renderChatsList();
+  loadChat(chatId);
+}
+
+function loadChat(chatId) {
+  const chat = chats.find(c => c.id === chatId);
+  if (chat) {
+    if (currentChatTitle) currentChatTitle.innerText = chat.title;
+    renderMessages(chat.messages);
+  }
+}
+
+function createNewChat() {
+  const newChat = {
+    id: Date.now(),
+    title: `Conversa ${chats.length + 1}`,
+    messages: [{ role: "assistant", content: "Olá! Sou a MITA. Como posso ajudar você hoje?", timestamp: new Date().toISOString() }],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    favorite: false,
+    tags: []
+  };
+  chats.unshift(newChat);
+  currentChatId = newChat.id;
+  saveChats();
+  renderChatsList();
+  loadChat(currentChatId);
+  showToast("Nova conversa criada!", "success");
+}
+
+window.deleteChat = function(chatId) {
+  if (chats.length === 1) {
+    showToast("Não é possível excluir a última conversa!", "warning");
+    return;
+  }
+  
+  chats = chats.filter(c => c.id !== chatId);
+  if (currentChatId === chatId) {
+    currentChatId = chats[0].id;
+    loadChat(currentChatId);
+  }
+  saveChats();
+  renderChatsList();
+  showToast("Conversa excluída!", "success");
+};
+
+window.editChatTitle = function(chatId) {
+  const chat = chats.find(c => c.id === chatId);
+  const newTitle = prompt("Novo título:", chat.title);
+  if (newTitle && newTitle.trim()) {
+    chat.title = newTitle.trim();
+    saveChats();
+    renderChatsList();
+    if (currentChatId === chatId && currentChatTitle) {
+      currentChatTitle.innerText = chat.title;
+    }
+    showToast("Título atualizado!", "success");
+  }
+};
+
+window.toggleFavoriteChat = function(chatId) {
+  const chat = chats.find(c => c.id === chatId);
+  chat.favorite = !chat.favorite;
+  saveChats();
+  renderChatsList();
+  showToast(chat.favorite ? "Adicionado aos favoritos!" : "Removido dos favoritos!", "success");
+};
+
+function clearCurrentChat() {
+  const chat = chats.find(c => c.id === currentChatId);
+  if (chat && confirm("Tem certeza que deseja limpar esta conversa?")) {
+    chat.messages = [{ role: "assistant", content: "Olá! Sou a MITA. Como posso ajudar você hoje?", timestamp: new Date().toISOString() }];
+    chat.updatedAt = new Date().toISOString();
+    saveChats();
+    loadChat(currentChatId);
+    showToast("Conversa limpa!", "success");
+  }
+}
+
+// ===== FUNÇÕES DE MENSAGEM =====
+function renderMessages(messages) {
+  if (!messagesContainer) return;
+  
+  if (!messages || messages.length === 0) {
+    messagesContainer.innerHTML = `
+      <div class="welcome-screen">
+        <div class="welcome-icon">🤖</div>
+        <h2>Bem-vindo à MITA</h2>
+        <p>Sua assistente inteligente para programação, tecnologia e muito mais.</p>
+        <div class="suggestions">
+          <button class="suggestion-chip" data-msg="Me ensine sobre APIs">📚 Me ensine sobre APIs</button>
+          <button class="suggestion-chip" data-msg="Gere um código em Python">💻 Gere um código em Python</button>
+          <button class="suggestion-chip" data-msg="Explique inteligência artificial">🧠 Explique IA</button>
+          <button class="suggestion-chip" data-msg="Como resolver um erro?">🐛 Como resolver um erro?</button>
+        </div>
+      </div>
+    `;
+    
+    document.querySelectorAll('.suggestion-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        userInput.value = chip.dataset.msg;
+        sendMessage();
+      });
+    });
+    return;
+  }
+  
+  messagesContainer.innerHTML = messages.map((msg, idx) => `
+    <div class="message ${msg.role} fade-in">
+      <div class="message-avatar">${msg.role === 'user' ? '👤' : '🤖'}</div>
+      <div class="message-content">
+        ${formatMessageContent(msg.content)}
+        ${document.getElementById("showTimestamps")?.checked ? `<div class="message-timestamp">${new Date(msg.timestamp).toLocaleTimeString()}</div>` : ''}
+      </div>
+    </div>
+  `).join('');
+  
+  messagesContainer.scrollTop = messagesContainer.scrollHeight;
+}
+
+function formatMessageContent(content) {
+  let formatted = content;
+  
+  // Código formatado
+  formatted = formatted.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
+    return `<pre><code class="language-${lang || 'javascript'}">${escapeHtml(code)}</code></pre>`;
+  });
+  
+  // Negrito
+  formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  
+  // Itálico
+  formatted = formatted.replace(/\*(.*?)\*/g, '<em>$1</em>');
+  
+  // Imagens
+  formatted = formatted.replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1" onclick="window.showImageModal(this.src)" style="max-width: 100%; border-radius: 12px; cursor: pointer;">');
+  
+  // Links
+  formatted = formatted.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" style="color: var(--accent-primary); text-decoration: none;">$1</a>');
+  
+  // Linhas
+  formatted = formatted.replace(/\n/g, '<br>');
+  
+  return formatted;
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// ===== RESPOSTA COM API =====
+async function generateResponse(userMessage, context) {
+  const lowerMsg = userMessage.toLowerCase();
+  
+  // Comandos primeiro
+  if (lowerMsg.startsWith("/")) {
+    return handleCommands(userMessage);
+  }
+  
+  // Tentar usar API selecionada
+  try {
+    switch(apiMode) {
+      case "openai":
+        if (openaiKey) return await callOpenAI(userMessage, context);
+        break;
+      case "groq":
+        if (groqKey) return await callGroq(userMessage, context);
+        break;
+      case "ollama":
+        return await callOllama(userMessage, context);
+      default:
+        return await localResponse(userMessage, context);
+    }
+  } catch (error) {
+    console.error("Erro na API:", error);
+    showToast(`⚠️ Erro na API: ${error.message}. Usando modo local.`, "error");
+    return await localResponse(userMessage, context);
+  }
+  
+  return await localResponse(userMessage, context);
+}
+
+// ===== 1. OPENAI API =====
+async function callOpenAI(userMessage, context) {
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${openaiKey}`
+    },
+    body: JSON.stringify({
+      model: "gpt-3.5-turbo",
+      messages: [
+        { 
+          role: "system", 
+          content: `Você é a MITA (Machine Intelligence Thinking Assistant), uma IA técnica, direta e inteligente. 
+          Responda em português de forma clara e profissional. Ajude com código, explicações técnicas e resolução de problemas.
+          Seja contextual e mantenha a personalidade consistente. Use formatação markdown para código com \`\`\`.` 
+        },
+        ...context.slice(-10)
+      ],
+      temperature: 0.7,
+      max_tokens: 1000
+    })
+  });
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error?.message || "Erro na OpenAI");
+  }
+  
+  const data = await response.json();
+  return data.choices[0].message.content;
+}
+
+// ===== 2. GROQ API =====
+async function callGroq(userMessage, context) {
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${groqKey}`
+    },
+    body: JSON.stringify({
+      model: "mixtral-8x7b-32768",
+      messages: [
+        { 
+          role: "system", 
+          content: `Você é a MITA, IA técnica e direta. Responda em português de forma clara. Use formatação markdown para código.` 
+        },
+        ...context.slice(-10)
+      ],
+      temperature: 0.7,
+      max_tokens: 1000
+    })
+  });
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error?.message || "Erro na Groq");
+  }
+  
+  const data = await response.json();
+  return data.choices[0].message.content;
+}
+
+// ===== 3. OLLAMA API =====
+async function callOllama(userMessage, context) {
+  const ollamaMessages = context.map(msg => ({
+    role: msg.role === "assistant" ? "assistant" : "user",
+    content: msg.content
+  }));
+  
+  ollamaMessages.unshift({
+    role: "system",
+    content: "Você é a MITA, uma IA técnica e direta. Responda em português. Use formatação markdown para código."
+  });
+  
+  const response = await fetch(`${ollamaUrl}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "llama3.2",
+      messages: ollamaMessages,
+      stream: false,
+      options: {
+        temperature: 0.7,
+        num_predict: 1000
+      }
+    })
+  });
+  
+  if (!response.ok) {
+    throw new Error("Ollama não está rodando. Execute 'ollama serve' no terminal");
+  }
+  
+  const data = await response.json();
+  return data.message.content;
+}
+
+// ===== 4. MODO LOCAL =====
+async function localResponse(userMessage, context) {
+  const lowerMsg = userMessage.toLowerCase();
+  
+  if (lowerMsg.match(/^(oi|olá|ola|hey|e aí|eai)/i)) {
+    const greetings = [
+      `👋 Olá ${currentUser}! Como posso ajudar você hoje?`,
+      `✨ Oi! Sou a MITA, sua assistente técnica.`,
+      `🤖 Olá! Pronto para programar?`,
+      `💡 Ei ${currentUser}! Vamos resolver problemas técnicos?`
+    ];
+    return greetings[Math.floor(Math.random() * greetings.length)];
+  }
+  
+  if (lowerMsg.includes("código") || lowerMsg.includes("codigo")) {
+    let lang = "javascript";
+    if (lowerMsg.includes("python")) lang = "python";
+    if (lowerMsg.includes("java")) lang = "java";
+    if (lowerMsg.includes("html")) lang = "html";
+    return generateCodeExample(lang);
+  }
+  
+  if (lowerMsg.includes("explica") || lowerMsg.includes("o que é")) {
+    const topic = userMessage.replace(/explica|o que é|como funciona/gi, "").trim();
+    return explainTopic(topic || "programação");
+  }
+  
+  if (lowerMsg.includes("obrigado") || lowerMsg.includes("valeu")) {
+    return `🎯 Disponha ${currentUser}! Estou aqui para ajudar.`;
+  }
+  
+  const lastMessages = context.slice(-3);
+  const hasCode = lastMessages.some(m => m.content.includes("```"));
+  
+  if (hasCode) {
+    return `**💻 Sobre o código que discutimos:**\n\nQuer que eu:\n1️⃣ Modifique o exemplo\n2️⃣ Explique linha por linha\n3️⃣ Mostre uma versão mais avançada\n\nMe diga o número ou descreva o que precisa!`;
+  }
+  
+  return `**💡 MITA (Modo Local):**\n\nVocê perguntou: "${userMessage.substring(0, 100)}"\n\nPosso ajudar com:\n• 📝 **Código** - Gere exemplos em várias linguagens\n• 📚 **Explicações** - Conceitos técnicos claros\n• 🐛 **Debug** - Ajudo a resolver erros\n• 🎯 **Dicas** - Melhores práticas\n\n**💡 Dica:** Para respostas mais avançadas, configure OpenAI, Groq ou Ollama!`;
+}
+
+function generateCodeExample(language) {
+  const examples = {
+    javascript: `// Função exemplo em JavaScript
+function processarDados(dados) {
+    try {
+        const resultado = dados.map(item => item * 2);
+        console.log('Processado:', resultado);
+        return resultado;
+    } catch (erro) {
+        console.error('Erro:', erro);
+        return null;
+    }
+}
+
+// Exemplo de uso
+const dados = [1, 2, 3, 4, 5];
+const resultado = processarDados(dados);`,
+    
+    python: `# Função exemplo em Python
+def processar_dados(dados):
+    try:
+        resultado = [item * 2 for item in dados]
+        print(f'Processado: {resultado}')
+        return resultado
+    except Exception as erro:
+        print(f'Erro: {erro}')
+        return None
+
+# Exemplo de uso
+dados = [1, 2, 3, 4, 5]
+resultado = processar_dados(dados)`,
+    
+    java: `// Classe exemplo em Java
+public class Processador {
+    public static List<Integer> processar(List<Integer> dados) {
+        try {
+            return dados.stream()
+                .map(n -> n * 2)
+                .collect(Collectors.toList());
+        } catch (Exception e) {
+            System.err.println("Erro: " + e);
+            return null;
+        }
+    }
+    
+    public static void main(String[] args) {
+        List<Integer> dados = Arrays.asList(1, 2, 3, 4, 5);
+        List<Integer> resultado = processar(dados);
+        System.out.println(resultado);
+    }
+}`
+  };
+  
+  const code = examples[language] || examples.javascript;
+  
+  return `**💻 Código em ${language.toUpperCase()}:**\n\n\`\`\`${language}\n${code}\n\`\`\`\n\n📌 Quer que eu modifique para sua necessidade específica?`;
+}
+
+function explainTopic(topic) {
+  const explanations = {
+    api: "**API (Application Programming Interface)** é um conjunto de regras que permite que diferentes softwares se comuniquem. Como um garçom em um restaurante, ela recebe seu pedido e traz a resposta do sistema.",
+    "inteligência artificial": "**IA** é a área da computação que cria sistemas capazes de realizar tarefas que normalmente exigem inteligência humana: aprendizado, raciocínio, percepção e tomada de decisão.",
+    blockchain: "**Blockchain** é um livro-razão digital descentralizado onde transações são registradas em blocos encadeados e criptografados, imutáveis e transparentes.",
+    cloud: "**Cloud Computing** é a entrega de serviços de computação (servidores, armazenamento, bancos de dados) pela internet, pagando apenas pelo que usa."
+  };
+  
+  for (const [key, explanation] of Object.entries(explanations)) {
+    if (topic.toLowerCase().includes(key)) {
+      return explanation + "\n\nQuer um exemplo prático ou mais detalhes?";
+    }
+  }
+  
+  return `**🧠 Explicação sobre "${topic}":**\n\n${topic} é um conceito fundamental em tecnologia. Basicamente, envolve a organização e processamento de informações para resolver problemas específicos.\n\nQuer que eu detalhe mais ou mostre exemplos práticos?`;
+}
+
+// ===== COMANDOS =====
+function handleCommands(command) {
+  const lower = command.toLowerCase();
+  
+  if (lower ===
